@@ -31,6 +31,7 @@ title("Audio Waveform Plot");
 % resample
 new_fs = 16000;
 x_mono_16k = resample(bird, new_fs, fs); 
+[num_x_16k,~] = size(x_mono_16k);
 
 % sound(x_mono_16k, new_fs);
 % pause(10.5);
@@ -53,6 +54,7 @@ title("Audio Waveform Plot upsampled");
 % moving average filter
 MA_window_size = 21;
 y_ma = MA_filter(x_mono_16k, MA_window_size);
+y_ma_best = MA_filter(x_mono_16k, 47);
 % sound(y_ma, 16000);
 
 
@@ -72,6 +74,7 @@ for i=Gauss_window_size:size(copy_sample1)
 end
 gaussian_filter = gaussian_filter(Gauss_window_size:end);
 y_wa = gaussian_filter;
+y_wa_best = y_wa;
 % sound(gaussian_filter, 16000);
 
 
@@ -88,6 +91,7 @@ for i=median_window_size:size(copy_sample2)
 end
 median_filter = median_filter(median_window_size:end);
 y_med = median_filter;
+y_med_best = y_med;
 % sound(median_filter, 16000);
 
 
@@ -140,15 +144,93 @@ ylabel("SNR (dB)");
 title("SNR ratio");
 hold off;
 
+% Evaluate noise after filtering
+% FFT of input - selected region
+fft_fs = 8000;
+start_samp = 28500;
+end_samp = 29500; % num_x_16k;
+length = end_samp - start_samp;
+freq = fft_fs*(0:floor(length/2))/length; % Get rid of mirrored output
+x_fft = fft(x_mono_16k(start_samp:end_samp));
+x_fft = mag2db(abs(x_fft));
+x_fft = x_fft((1:(floor(length/2))+1));
+figure(plot_num);
+plot_num = plot_num + 1;
+plot(freq, x_fft);
+xlabel("Frequency (Hz)");
+ylabel("Magnitude (dB)");
+title("FFT of audio input");
+
+% FFT of input - entire clip
+length = num_x_16k;
+x_fft = fft(x_mono_16k);
+x_fft = mag2db(abs(x_fft));
+x_fft = x_fft((1:(floor(length/2))+1));
+
+% FFT of the output of moving average filter
+freq = fft_fs*(0:floor(length/2))/length; % Get rid of mirrored output
+ma_fft = fft(y_ma_best);
+ma_fft = mag2db(abs(ma_fft));
+ma_fft = ma_fft((1:(floor(length/2))+1));
+figure(plot_num);
+plot_num = plot_num + 1;
+plot(freq, ma_fft);
+xlabel("Frequency (Hz)");
+ylabel("Magnitude (dB)");
+title("FFT of moving average output");
+figure(plot_num);
+plot_num = plot_num + 1;
+plot(freq, (ma_fft - x_fft));
+xlabel("Frequency (Hz)");
+ylabel("Magnitude (dB)");
+title("Frequency response of moving average filter");
+
+% FFT of the output of weighted average filter
+freq = fft_fs*(0:floor(length/2))/length; % Get rid of mirrored output
+wa_fft = fft(y_wa_best);
+wa_fft = mag2db(abs(wa_fft));
+wa_fft = wa_fft((1:(floor(length/2))+1));
+figure(plot_num);
+plot_num = plot_num + 1;
+plot(freq, wa_fft);
+xlabel("Frequency (Hz)");
+ylabel("Magnitude (dB)");
+title("FFT of weighted average output");
+figure(plot_num);
+plot_num = plot_num + 1;
+plot(freq, (wa_fft - x_fft)); % ERROR: array size too big?!
+xlabel("Frequency (Hz)");
+ylabel("Magnitude (dB)");
+title("Frequency response of weighted average filter");
+
+% FFT of the output of median filter
+freq = fft_fs*(0:floor(length/2))/length; % Get rid of mirrored output
+med_fft = fft(y_med_best);
+med_fft = mag2db(abs(med_fft));
+med_fft = med_fft((1:(floor(length/2))+1));
+figure(plot_num);
+plot_num = plot_num + 1;
+plot(freq, med_fft);
+xlabel("Frequency (Hz)");
+ylabel("Magnitude (dB)");
+title("FFT of median output");
+figure(plot_num);
+plot_num = plot_num + 1;
+plot(freq, (med_fft - x_fft));
+xlabel("Frequency (Hz)");
+ylabel("Magnitude (dB)");
+title("Frequency response of median filter");
+
+
 
 %%% part 3: signal analysis
 % detect silent region
 silent = 0;
 silent_counter = 0;
 % min silent length = 100 samples, silent threshold: 0 ~ -0.010
-for i=1:size(moving_average_filter)
+for i=1:size(y_ma)
     % start counting silent length
-    if moving_average_filter(i) > -0.010 && moving_average_filter(i) < -0.002
+    if y_ma(i) > -0.010 && y_ma(i) < -0.002
         silent_counter = silent_counter + 1;
     else
         if silent_counter > 100
