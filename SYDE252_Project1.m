@@ -60,39 +60,41 @@ y_ma_best = MA_filter(x_mono_16k, 47);
 
 
 % weighted moving average filter
-gaussian_filter = [];
+% gaussian_filter = [];
+% 
+% gauss_buffer = zeros([Gauss_window_size-1 1]);
+% copy_sample1 = cat(1, gauss_buffer, x_mono_16k);
+% 
+% Gauss_factors = gausswin(Gauss_window_size);
+% 
+% for i=Gauss_window_size:size(copy_sample1)
+%     sample_window = copy_sample1(i-Gauss_window_size+1:i);
+%     Gauss_sum = sum(sample_window .* Gauss_factors);
+%     gaussian_filter(i) = Gauss_sum / Gauss_window_size;
+% end
+% gaussian_filter = gaussian_filter(Gauss_window_size:end);
 Gauss_window_size = 14;
-gauss_buffer = zeros([Gauss_window_size-1 1]);
-copy_sample1 = cat(1, gauss_buffer, x_mono_16k);
-
-Gauss_factors = gausswin(Gauss_window_size);
-
-for i=Gauss_window_size:size(copy_sample1)
-    sample_window = copy_sample1(i-Gauss_window_size+1:i);
-    Gauss_sum = sum(sample_window .* Gauss_factors);
-    gaussian_filter(i) = Gauss_sum / Gauss_window_size;
-end
-gaussian_filter = gaussian_filter(Gauss_window_size:end);
-y_wa = gaussian_filter;
+y_wa = WA_filter(x_mono_16k, Gauss_window_size);
 y_wa_best = y_wa;
-% sound(gaussian_filter, 16000);
+% sound(y_wa, 16000);
 
 
 
 % median filter
-median_filter = [];
-median_window_size = 2;
-median_buffer = zeros([median_window_size-1 1]);
-copy_sample2 = cat(1, median_buffer, x_mono_16k);
+% median_filter = [];
 
-for i=median_window_size:size(copy_sample2)
-    sample_window = copy_sample2(i-median_window_size+1:i);
-    median_filter(i) = median(sample_window);
-end
-median_filter = median_filter(median_window_size:end);
-y_med = median_filter;
+% median_buffer = zeros([median_window_size-1 1]);
+% copy_sample2 = cat(1, median_buffer, x_mono_16k);
+% 
+% for i=median_window_size:size(copy_sample2)
+%     sample_window = copy_sample2(i-median_window_size+1:i);
+%     median_filter(i) = median(sample_window);
+% end
+% median_filter = median_filter(median_window_size:end);
+median_window_size = 48;
+y_med = MED_filter(x_mono_16k, median_window_size);
 y_med_best = y_med;
-% sound(median_filter, 16000);
+% sound(y_med, 16000);
 
 
 
@@ -216,7 +218,7 @@ ylabel("Magnitude (dB)");
 title("FFT of median output");
 figure(plot_num);
 plot_num = plot_num + 1;
-plot(freq, (med_fft - x_fft));
+plot(freq, (med_fft - x_fft)); % ERROR: array size too big?!
 xlabel("Frequency (Hz)");
 ylabel("Magnitude (dB)");
 title("Frequency response of median filter");
@@ -227,25 +229,41 @@ title("Frequency response of median filter");
 % detect silent region
 silent = 0;
 silent_counter = 0;
-% min silent length = 100 samples, silent threshold: 0 ~ -0.010
+silent_region = [];
+region_counter = 1;
+lower_limit = -5.8e-3;
+upper_limit = -4.1e-3;
+
 for i=1:size(y_ma)
     % start counting silent length
-    if y_ma(i) > -0.010 && y_ma(i) < -0.002
+    if y_ma(i) > -5.85e-3 && y_ma(i) < -3.8e-3
         silent_counter = silent_counter + 1;
     else
-        if silent_counter > 100
+        if silent_counter > 3000
             silent = silent + silent_counter;
+            silent_region(region_counter, :) = [i-silent_counter, i];
+            region_counter = region_counter + 1;
         end
         silent_counter = 0;
     end
 end
-sample_time = length(bird)./fs;
-silent_time = sample_time * (silent/length(x_mono_16k));
-disp(silent_time);
+[sample_size, ~] = size(bird);
+sample_time = sample_size / fs;
+[upsampled_size, ~] = size(x_mono_16k);
+silent_time = sample_time * (silent/upsampled_size);
+disp("silent time: " + silent_time);
+
+figure(41);
+for i=1:size(silent_region)
+    silent_interval = silent_region(i, 2) - silent_region(i, 1);
+    rectangle('Position', [silent_region(i,1),lower_limit,silent_interval,upper_limit-lower_limit]);
+end
+
+% func_silent = detect_silence(y_ma, x_mono_16k, -4.1e-3, -5.8e-3, 1000);
 
 
 
-% tiffany's functions
+% filter functions
 
 function y = MA_filter(x, L)
     [sample_num, ~] = size(x);
@@ -275,4 +293,44 @@ function y = MED_filter(x, L)
     for n = 1:sample_num
         y(n) = median(x(n:n+L-1));
     end
+end
+
+% slient time
+function time = detect_silence(sample, sample_16k, upper_limit, lower_limit, min_size)
+    % min silent length = [min_size] samples, 
+    % silent threshold: lower_limit ~ upper_limit
+    row = 1;
+    record_start = false;
+    start_index = 0;
+    end_index = 0;
+
+    [sample_size, ~] = size(sample);
+
+    for i=1:sample_size
+        % start counting silent length
+        if sample(i) > lower_limit && sample(i) < upper_limit
+            if ~record_start
+                start_index = i;
+                record_start = true;
+            end
+            end_index = end_index + 1;
+        else
+            if end_index-start_index > min_size
+                time(row, :) = [start_index end_index];
+                % disp("silent time intervals (function): " + time(row, :));
+                row = row + 1;
+                record_start = false;
+                start_index = end_index;
+            end
+        end
+    end
+    
+    sample_time = sample_size / 11025;
+    [upsampled_size, ~] = size(sample_16k);
+    silent = 0;
+    
+    silent_time = sample_time * (silent/upsampled_size);
+    disp("silent time (function): " + silent_time);
+
+
 end
